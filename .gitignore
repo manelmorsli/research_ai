@@ -1,0 +1,25 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Python
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+
+# Model weights & large binary files
+backend/app/late_chunking/embed_model/
+api/embed_model/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.onnx_data
+
+# Tools
+.claude/
+.git/

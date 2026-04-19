@@ -1,0 +1,78 @@
+services:
+
+  ########################################################################################
+  # RESEARCH AI — lightweight lab for embedding & chunking experiments
+  ########################################################################################
+  research-backend:
+    build:
+      context: ./backend
+    container_name: research-backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend:/code
+      - huggingface_hub:/huggingface
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - HF_HOME=/huggingface
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  ########################################################################################
+  research-frontend:
+    build:
+      context: ./frontend
+    container_name: research-frontend
+    ports:
+      - "8080:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - research-backend
+
+  ########################################################################################
+  # One-shot service: downloads jinaai/jina-embeddings-v3 into the huggingface_hub volume.
+  # Run manually when needed:  docker compose run --rm model-downloader
+  # Subsequent runs are instant — the model is already in the volume.
+  ########################################################################################
+  model-downloader:
+    image: python:3.12-slim
+    container_name: model-downloader
+    volumes:
+      - huggingface_hub:/huggingface
+    environment:
+      - HF_HOME=/huggingface
+    command:
+      - sh
+      - -c
+      - |
+        MODEL_DIR=/huggingface/hub/models--jinaai--jina-embeddings-v3/snapshots
+        if [ -d "$$MODEL_DIR" ] && [ "$$(ls -A $$MODEL_DIR 2>/dev/null)" ]; then
+          echo 'jina-embeddings-v3 already in volume — nothing to do.'
+        else
+          echo 'Downloading jinaai/jina-embeddings-v3 (~2 GB)...'
+          pip install huggingface_hub -q
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('jinaai/jina-embeddings-v3', ignore_patterns=['*.msgpack','*.h5','flax_model*','tf_model*'])"
+          echo 'Download complete.'
+        fi
+    restart: "no"
+
+  ########################################################################################
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ollama_data:        # existing volume — preserves downloaded Ollama models
+  huggingface_hub:    # jina-embeddings-v3 and future HuggingFace models
