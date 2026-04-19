@@ -339,6 +339,7 @@ _Add your notes here after testing._
 
 ## 8. Late Chunking — jina-embeddings-v3 (HuggingFace)
 
+
 **Description:**  
 The full document is tokenized and passed through `jina-embeddings-v3` (8192-token context window) in a single forward pass. Token-level hidden states are then mean-pooled for each fixed-size chunk boundary. Unlike standard embedding (each chunk encoded in isolation), every embedding carries full-document context.
 
@@ -379,13 +380,89 @@ _Add your notes here after testing._
 
 ---
 
+## 9. Markdown Headers
+
+**Description:**  
+Splits on Markdown heading markers (`#`, `##`, `###`). Each section between headings becomes one chunk. Best suited for `.md` files or documents exported with Markdown structure.
+
+**Parameters tested:**
+
+| Parameter | Value |
+|---|---|
+| Min section size | 100 chars |
+
+**Expected behavior:**
+- Each chunk corresponds to one Markdown section
+- Chunk text begins with the heading line
+- Deeply nested sections (`###`) are split from their parent (`##`)
+- Short sections below `min_section_size` are merged with the next section
+
+**Screenshot:**
+
+![Markdown headers — default](screenshots/09_markdown_headers_default.png)
+
+**Test — large min section size (500 chars, more merging):**
+
+Expected: short sections get merged into larger chunks.
+
+![Markdown headers — large min section](screenshots/09_markdown_headers_large_min.png)
+
+**Observations:**  
+_This is a good strategy for structured Markdown files, and it would work well for scraped data from websites — but it requires data preprocessing (cleaning and filtering) before chunking and embedding, such as removing duplicates and irrelevant content._
+
+**Result:** [x] Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+
+---
+
+## 10. Section-Based (PDF / Plain Text)
+
+**Description:**  
+Detects structural headings in plain text and PDFs: numbered headings (`1.`, `2.1`), Roman numerals (`I.`, `II.`), ALL CAPS titles, and academic keywords (`Abstract`, `Introduction`, `Conclusion`, etc.). Each detected section becomes one chunk.
+
+**Parameters tested:**
+
+| Parameter | Value |
+|---|---|
+| Min section size | 50 chars |
+
+**Expected behavior:**
+- Chunks align with logical document sections and subsections (1.  /  1.1  /  1.1.1)
+- `section_title` badge on each card shows the detected heading title
+- Deep subsections (`3.2.1`, `3.2.2`, `3.3`…) each produce their own chunk
+- Works with both Plain text and Markdown parser (after fix)
+
+**Test — PDF parser: Markdown, document A:**
+
+Result: only **2 chunks** — entire document collapsed into one large block, no section boundaries detected.
+
+![Section-based — Markdown parser, document A](screenshots/10_sections_markdown_PDF.png)
+
+**Test — PDF parser: Markdown, document B (deep subsections):**
+
+Result: **49 chunks** — `Chapter 2`, `2.1`, `2.1.1`, `2.2`, `2.2.1`, `2.2.2` all detected correctly.
+
+![Section-based — Markdown parser, document B](screenshots/10_sections_markdown_subsection.png)
+
+**Test — PDF parser: Plain text, document B:**
+
+Result: **49 chunks** — full subsection hierarchy detected: `3.2.1 Quantitative Surveys`, `3.2.2 Qualitative Interviews`, `3.3 Participant Selection`, `3.4.1 Quantitative Analysis`…
+
+![Section-based — Plain text parser, document A](screenshots/10_sections_plaintext.png)
+
+**Observations:**  
+_Results vary depending on the PDF and the parser used. The Plain text parser works reliably for documents with numbered sections. The Markdown parser can produce very detailed splits on some PDFs (document B: 49 chunks with deep subsections) but may collapse the entire document on others. The min_section_size parameter controls whether short subsections get their own chunk or are merged into the next one._
+
+**Result:** [x] Pass — works correctly with both parsers after the backend fix
+
+---
+
 ---
 
 # HYBRID STRATEGIES
 
 ---
 
-## 9. Semantic → Hierarchical
+## 11. Semantic → Hierarchical
 
 **Description:**  
 First applies semantic chunking to create context-aware parent chunks (topic-based boundaries). Then applies fixed-size splitting on each parent to create child chunks. Combines semantic coherence at the parent level with uniform granularity at the child level.
@@ -416,7 +493,7 @@ _Add your notes here after testing._
 
 ---
 
-## 10. Recursive → Contextual
+## 12. Recursive → Contextual
 
 **Description:**  
 Applies recursive splitting (structure-aware), then enriches each chunk with LLM-generated context (same as Contextual strategy). Combines the precision of recursive splitting with the retrieval improvement of contextual enrichment.
@@ -448,7 +525,7 @@ _Add your notes here after testing._
 
 ---
 
-## 11. Paragraph → Semantic Merge
+## 13. Paragraph → Semantic Merge
 
 **Description:**  
 Starts with natural paragraph splits, then merges adjacent paragraphs if their cosine similarity exceeds the threshold AND the merged size stays under `max_merged_size`. Creates semantically coherent chunks that respect document structure.
@@ -505,6 +582,8 @@ Run each strategy in **Chunks + Embeddings** mode and compare.
 | Semantic | | | | | |
 | Hierarchical | | | | | |
 | Contextual | | | | | |
+| Markdown headers | | | | | |
+| Section-based | | | | | |
 | Hybrid sem→hier | | | | | |
 | Hybrid rec→ctx | | | | | |
 | Hybrid para→sem | | | | | |
@@ -575,9 +654,11 @@ Switch to Raw JSON after any run. Expected: full JSON response displayed correct
 | 6 | Hierarchical | Chunk + Embed | | |
 | 7 | Contextual | Chunk + Embed | | |
 | 8 | Late Chunking | Embed only | | Requires model download |
-| 9 | Hybrid sem→hier | Chunk + Embed | | |
-| 10 | Hybrid rec→ctx | Chunk + Embed | | |
-| 11 | Hybrid para→sem | Chunk + Embed | | |
+| 9 | Markdown headers | Chunk + Embed | | Best for .md files |
+| 10 | Section-based | Chunk + Embed | Pass | Both parsers ✅ after backend fix — 49 chunks on deep subsection PDF |
+| 11 | Hybrid sem→hier | Chunk + Embed | | |
+| 12 | Hybrid rec→ctx | Chunk + Embed | | |
+| 13 | Hybrid para→sem | Chunk + Embed | | |
 
 ---
 

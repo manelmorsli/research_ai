@@ -333,8 +333,11 @@ _SECTION_KEYWORDS = {
 
 def _is_pdf_section_header(line: str) -> bool:
     s = line.strip()
-    if not s or len(s) > 80:
+    if not s or len(s) > 120:
         return False
+    # Markdown headings: # Title  /  ## **Title**  (from Markdown parser output)
+    if re.match(r"^#{1,6}\s+", s):
+        return True
     # Numbered: 1.  /  1.1  /  1.1.1  /  1)
     if re.match(r"^\d+(\.\d+)*[.)]\s+\S", s):
         return True
@@ -348,6 +351,13 @@ def _is_pdf_section_header(line: str) -> bool:
     if s.isupper() and 4 <= len(s) <= 70 and not s.startswith("HTTP"):
         return True
     return False
+
+
+def _clean_section_title(line: str) -> str:
+    """Strip Markdown heading markers and bold/italic markers from a title line."""
+    s = re.sub(r"^#{1,6}\s+", "", line.strip())  # remove leading # marks
+    s = re.sub(r"\*+", "", s)                      # remove ** bold markers
+    return s.strip()
 
 
 def _sections(
@@ -377,7 +387,7 @@ def _sections(
                         "text": chunk_text_val,
                         "section_title": current_title,
                     })
-            current_title = line.strip()
+            current_title = _clean_section_title(line)
             buf = []
         else:
             buf.append(line)

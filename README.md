@@ -63,3 +63,6 @@ To run in development mode:
 ## License
 
 This project is licensed under the MIT License.
+
+## Hugging face token 
+docker compose run --rm -e HF_TOKEN=hf_you_token model-downloader

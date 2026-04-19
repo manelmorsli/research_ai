@@ -38,25 +38,13 @@ services:
   # Subsequent runs are instant — the model is already in the volume.
   ########################################################################################
   model-downloader:
-    image: python:3.12-slim
+    build:
+      context: ./model_downloader
     container_name: model-downloader
     volumes:
       - huggingface_hub:/huggingface
     environment:
       - HF_HOME=/huggingface
-    command:
-      - sh
-      - -c
-      - |
-        MODEL_DIR=/huggingface/hub/models--jinaai--jina-embeddings-v3/snapshots
-        if [ -d "$$MODEL_DIR" ] && [ "$$(ls -A $$MODEL_DIR 2>/dev/null)" ]; then
-          echo 'jina-embeddings-v3 already in volume — nothing to do.'
-        else
-          echo 'Downloading jinaai/jina-embeddings-v3 (~2 GB)...'
-          pip install huggingface_hub -q
-          python -c "from huggingface_hub import snapshot_download; snapshot_download('jinaai/jina-embeddings-v3', ignore_patterns=['*.msgpack','*.h5','flax_model*','tf_model*'])"
-          echo 'Download complete.'
-        fi
     restart: "no"
 
   ########################################################################################
@@ -64,7 +52,7 @@ services:
     image: ollama/ollama:latest
     container_name: ollama
     volumes:
-      - ollama_data:/root/.ollama
+      - recentcode_ollama_data:/root/.ollama
     ports:
       - "11434:11434"
     healthcheck:
@@ -74,5 +62,6 @@ services:
       retries: 10
 
 volumes:
-  ollama_data:        # existing volume — preserves downloaded Ollama models
-  huggingface_hub:    # jina-embeddings-v3 and future HuggingFace models
+  recentcode_ollama_data:   # bge-m3 + qwen2.5 already downloaded — shared from previous project
+    external: true
+  huggingface_hub:          # jina-embeddings-v3 and future HuggingFace models
