@@ -130,7 +130,6 @@ export default function Sidebar({
           <select className="sidebar-select" value={params.embedModel}
             onChange={e => update('embedModel', e.target.value)}>
             <option value="ollama:bge-m3">bge-m3 — Ollama</option>
-            <option value="ollama:nomic-embed-text">nomic-embed-text — Ollama</option>
           </select>
         </section>
       )}

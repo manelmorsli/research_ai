@@ -76,6 +76,14 @@ function buildFormData(
       params.semanticEmbedModel,
     )
   }
+  if (panels.includes('late-chunk')) {
+    fd.append('late_chunk_mode', params.lateChunkMode)
+    fd.append('chunk_size', String(params.chunkSize))
+    fd.append('overlap_type', params.overlapType)
+    fd.append('overlap_value', String(params.overlapValue))
+    fd.append('snap_boundary', params.snapBoundary)
+    fd.append('percentile_threshold', String(params.percentileThreshold))
+  }
   if (panels.includes('hierarchical')) {
     fd.append('parent_chunk_size', String(params.parentChunkSize))
     fd.append('child_chunk_size', String(params.childChunkSize))

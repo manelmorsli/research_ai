@@ -8,6 +8,7 @@ export type Panel =
   | 'hybrid-child'
   | 'para-sem'
   | 'section'
+  | 'late-chunk'
 
 export interface StrategyMeta {
   label: string
@@ -90,16 +91,14 @@ export const STRATEGY_CONFIG: Record<string, StrategyMeta> = {
     description: 'Paragraph splits, then adjacent similar paragraphs are merged.',
   },
   'late-chunking': {
-    label: 'Late Chunking  (jina-embeddings-v3)',
+    label: 'Late Chunking (jina-embeddings-v3)',
     group: 'Advanced',
-    panels: ['chunk-size', 'overlap'],
-    overlapType: 'chars',
-    overlapValue: 50,
+    panels: ['late-chunk'],
     embedOnly: true,
     description:
-      'Full-document token embeddings from jina-embeddings-v3 (HuggingFace, ~2 GB). ' +
-      'Chunk boundaries are defined first, then token hidden-states are mean-pooled per ' +
-      'chunk — preserving cross-chunk context in every embedding.',
+      'Full document is passed through jina-embeddings-v3 once — every token embedding ' +
+      'carries the full document context. Choose Fixed mode to pool by size, or ' +
+      'Context-aware to let similarity drops define the boundaries automatically.',
   },
   'markdown-headers': {
     label: 'Markdown headers',

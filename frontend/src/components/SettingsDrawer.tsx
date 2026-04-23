@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getModelStatus, downloadModel } from '../api'
+import { getModelStatus } from '../api'
 import type { ModelStatus } from '../types'
 
 interface Props {
@@ -8,14 +8,15 @@ interface Props {
 
 const OLLAMA_MODELS = [
   { name: 'bge-m3', type: 'Embedding', dims: '1024', context: '8192 tokens', note: 'Primary embedding model' },
-  { name: 'nomic-embed-text', type: 'Embedding', dims: '768', context: '2048 tokens', note: 'Alternative embedding model' },
   { name: 'qwen2.5:1.5b', type: 'LLM', dims: '—', context: '32k tokens', note: 'Used for contextual chunking' },
 ]
+
+const DOWNLOAD_CMD = 'docker compose run --rm -e HF_TOKEN=hf_your_token model-downloader'
 
 export default function SettingsDrawer({ onClose }: Props) {
   const [status, setStatus] = useState<ModelStatus | null>(null)
   const [polling, setPolling] = useState(false)
-  const [actionMsg, setActionMsg] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const fetchStatus = async () => {
     try {
@@ -31,34 +32,26 @@ export default function SettingsDrawer({ onClose }: Props) {
     fetchStatus()
   }, [])
 
-  // Poll while downloading
+  // Poll every 4 s while the user has the drawer open and model isn't ready yet
   useEffect(() => {
     if (!polling) return
     const id = setInterval(async () => {
       const s = await fetchStatus()
-      if (s && s.state !== 'downloading') {
+      if (s?.downloaded) {
         setPolling(false)
         clearInterval(id)
       }
-    }, 3000)
+    }, 4000)
     return () => clearInterval(id)
   }, [polling])
 
-  const handleDownload = async () => {
-    setActionMsg('')
-    const res = await downloadModel()
-    setActionMsg(res.message)
-    if (res.ok) {
+  const handleCopy = () => {
+    navigator.clipboard.writeText(DOWNLOAD_CMD).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+      // Start polling so the drawer auto-updates when the download finishes
       setPolling(true)
-      fetchStatus()
-    }
-  }
-
-  const stateColor = (s: ModelStatus) => {
-    if (s.downloaded || s.state === 'ready') return 'status-ready'
-    if (s.state === 'downloading') return 'status-loading'
-    if (s.state === 'error') return 'status-error'
-    return 'status-idle'
+    })
   }
 
   return (
@@ -105,33 +98,40 @@ export default function SettingsDrawer({ onClose }: Props) {
           </h3>
           <p className="drawer-hint">
             Required for the <strong>Late Chunking</strong> strategy. The model runs locally in the
-            backend container (no API key needed).
+            backend container (no API key needed after download).
           </p>
 
           {status && (
             <div className="model-card">
               <div className="model-card-row">
-                <span className={`status-dot ${stateColor(status)}`} />
+                <span className={`status-dot ${status.downloaded ? 'status-ready' : 'status-idle'}`} />
                 <strong>{status.model_id}</strong>
                 <span className="model-card-meta">
                   {status.dims}d · {status.context_tokens} tokens · ~{status.size_gb} GB
                 </span>
               </div>
-              <p className="model-msg">{status.message}</p>
-              {status.state === 'downloading' && (
-                <div className="progress-bar">
-                  <div className="progress-bar-inner" />
+
+              {status.downloaded ? (
+                <div className="ready-badge">Available — Late Chunking enabled</div>
+              ) : (
+                <div className="download-cmd-block">
+                  <p className="download-cmd-hint">
+                    Run this command in your terminal to download the model (~2 GB):
+                  </p>
+                  <div className="download-cmd-row">
+                    <code className="download-cmd-code">{DOWNLOAD_CMD}</code>
+                    <button className="copy-cmd-btn" onClick={handleCopy}>
+                      {copied ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className="download-cmd-hint" style={{ marginTop: '0.4rem' }}>
+                    Replace <code>hf_your_token</code> with your{' '}
+                    <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noreferrer">
+                      HuggingFace token
+                    </a>. The drawer will update automatically when the download completes.
+                  </p>
                 </div>
               )}
-              {!status.downloaded && status.state !== 'downloading' && (
-                <button className="download-btn" onClick={handleDownload}>
-                  Download from HuggingFace Hub
-                </button>
-              )}
-              {status.downloaded && (
-                <div className="ready-badge">Model ready — Late Chunking enabled</div>
-              )}
-              {actionMsg && <p className="action-msg">{actionMsg}</p>}
             </div>
           )}
         </section>

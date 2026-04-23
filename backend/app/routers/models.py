@@ -5,12 +5,10 @@ GET  /models/status   — check if jina-embeddings-v3 is downloaded
 POST /models/download — kick off background download from HuggingFace Hub
 """
 import sys
-from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks
 
 router = APIRouter()
 
-_MODEL_PATH = Path(__file__).parent.parent / "late_chunking" / "embed_model"
 _state: dict = {"state": "idle", "message": "Model not downloaded yet."}
 
 
@@ -58,7 +56,6 @@ def _do_download():
 
         snapshot_download(
             repo_id="jinaai/jina-embeddings-v3",
-            local_dir=str(_MODEL_PATH),
             ignore_patterns=["*.msgpack", "*.h5", "flax_model*", "tf_model*"],
         )
         _state["state"] = "ready"

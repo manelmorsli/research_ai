@@ -25,6 +25,8 @@ export interface RunParams {
   paraSemEmbedModel: string
   // section-based / markdown-headers
   minSectionSize: number
+  // late-chunking mode
+  lateChunkMode: string
   // pdf parsing
   pdfMode: string
   // embed model

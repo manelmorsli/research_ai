@@ -31,6 +31,8 @@ async def embed_document(
     max_merged_size: int = Form(1500),
     # section-based / markdown-headers
     min_section_size: int = Form(100),
+    # late-chunking mode
+    late_chunk_mode: str = Form("fixed"),
     # pdf parsing mode
     pdf_mode: str = Form("text"),
 ):
@@ -45,10 +47,21 @@ async def embed_document(
             raise HTTPException(500, str(e))
         try:
             t0 = time.perf_counter()
-            raw = chunk_and_embed(text, chunk_size=chunk_size, overlap_chars=overlap_value)
+            raw = chunk_and_embed(
+                text,
+                chunk_size=chunk_size,
+                overlap_chars=overlap_value,
+                snap_boundary=snap_boundary,
+                mode=late_chunk_mode,
+                similarity_threshold=percentile_threshold / 100,
+            )
             elapsed_ms = round((time.perf_counter() - t0) * 1000)
         except RuntimeError as e:
             raise HTTPException(400, str(e))
+        except Exception as e:
+            import traceback, logging
+            logging.error("late-chunking error: %s\n%s", e, traceback.format_exc())
+            raise HTTPException(500, f"Late chunking failed: {type(e).__name__}: {e}")
 
         indexed = [{"index": i, **r} for i, r in enumerate(raw)]
         results = [
@@ -61,7 +74,7 @@ async def embed_document(
         ]
         return {
             "filename": file.filename,
-            "chunk_strategy": "late-chunking",
+            "chunk_strategy": chunk_strategy,
             "embed_model": "jina:jina-embeddings-v3",
             "total_chunks": len(results),
             "embedding_dim": len(raw[0]["embedding"]) if raw else 0,

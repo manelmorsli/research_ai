@@ -23,6 +23,7 @@ const DEFAULT_PARAMS: RunParams = {
   maxMergedSize: 1500,
   paraSemEmbedModel: 'bge-m3',
   minSectionSize: 100,
+  lateChunkMode: 'fixed',
   pdfMode: 'text',
   embedModel: 'ollama:bge-m3',
 }

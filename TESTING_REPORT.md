@@ -11,7 +11,7 @@
 
 | Component | Value |
 |---|---|
-| Embedding models (Ollama) | `bge-m3`, `nomic-embed-text` |
+| Embedding models (Ollama) | `bge-m3` |
 | LLM model (Ollama) | `qwen2.5:1.5b` |
 | HuggingFace model | `jinaai/jina-embeddings-v3` (late chunking) |
 | Backend | FastAPI + Uvicorn on port 8001 |
@@ -92,7 +92,7 @@ Expected: the last sentence of chunk N are the first sentence of chunk N+1.
 **Observations:**  
 _Add your notes here after testing._
 
-**Result:** ☐ Pass &nbsp;&nbsp; [x]ail &nbsp;&nbsp; ☐ Partial
+**Result:** ☐ Pass &nbsp;&nbsp; [x]fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -150,7 +150,7 @@ Splits on double newlines (`\n\n`). Each natural paragraph becomes a chunk. Over
 - Each chunk corresponds to one pageof the pdf (plus optional overlap prefix)
 - Works best on well-structured documents (articles, reports, books)
 
-**Screenshot:**
+**Screenshot:** Test with embedding for a markdown file  
 
 ![Paragraph chunking](screenshots/03_paragraph_default.png)
 
@@ -163,7 +163,7 @@ Expected: One sentence is overlapped
 
 ![Paragraph chunking — no overlap](screenshots/03_paragraph_sentence.png)
 
-**Test — overlap witth embeddings **
+**Test — overlap witth embeddings**
 
 Expected: Embedding will take too much time 
 
@@ -244,9 +244,13 @@ Splits text into sentences, embeds each sentence using an Ollama model, computes
 - The `break sim` badge on each card shows the cosine similarity at that break point
 - Lower percentile → fewer, larger chunks; higher percentile → more, smaller chunks
 
-**Screenshot:**
+**Screenshot:** Semantic chunking — 85th percentile with markdown is better than pdf
 
-![Semantic chunking — 85th percentile](screenshots/z.png)
+**PDF:**
+![Semantic chunking — 85th percentile](screenshots/05_semantic_85.png)
+
+**MARKDOWN:**
+![Semantic chunking — 85th percentile](screenshots/05_semantic_85_md.png)
 
 **Test — percentile: 70 (fewer chunks):**
 
@@ -254,14 +258,14 @@ Expected: larger chunks grouping more sentences.
 
 ![Semantic chunking — 70th percentile](screenshots/05_semantic_70.png)
 
-**Test — percentile: 95 (many chunks):**
+**Test — percentile: 50 (many chunks):**
 
 Expected: very fine-grained splits at any slight topic change.
 
-![Semantic chunking — 95th percentile](screenshots/05_semantic_95.png)
+![Semantic chunking — 95th percentile](screenshots/05_semantic_50.png)
 
 **Observations:**  
-_Add your notes here after testing._
+_Semantic chunking performs noticeably better on clean, structured documents (e.g. Markdown) than on raw PDF-extracted text. On Markdown, topic-shift boundaries align with actual section changes, producing coherent chunks. On PDFs, noisy extraction artifacts (headers, footers, metadata lines, broken sentences) distort the sentence-level similarity signal, causing boundaries to appear at arbitrary positions unrelated to real topic shifts. The strategy is therefore effective when the input text is well-formed, but unreliable on PDF sources without prior cleaning. Adjusting the break percentile (50–70) can reduce fragmentation, but does not compensate for noisy input._
 
 **Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
 
@@ -297,7 +301,7 @@ Expected: more children per parent, finer granularity.
 ![Hierarchical — 2048/128](screenshots/06_hierarchical_large_parent.png)
 
 **Observations:**  
-_Add your notes here after testing._
+_The hierarchical strategy introduces significant memory overhead by storing the full parent text inside every child chunk, resulting in high duplication across the output. The parent-child relationship provides little retrieval benefit when the parent boundaries are defined purely by fixed character size rather than semantic or structural boundaries — the "context" carried by the parent is arbitrary rather than meaningful. Increasing the parent size (2048) while reducing the child size (128) amplifies this problem: more children share the same large parent block, and the parent text becomes too broad to add useful context for any individual child. This strategy is only worth considering when parent boundaries are derived from document structure (e.g. sections or topics), not from fixed sizes._
 
 **Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
 
@@ -326,9 +330,6 @@ Each paragraph chunk is enriched with 1–2 sentences of LLM-generated context t
 
 ![Contextual chunking — with context boxes](screenshots/07_contextual_default.png)
 
-**Screenshot — timing comparison:**
-
-![Contextual chunking — timing](screenshots/07_contextual_timing.png)
 
 **Observations:**  
 _Add your notes here after testing._

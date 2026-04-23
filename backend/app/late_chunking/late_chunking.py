@@ -1,25 +1,17 @@
 """
 Late Chunking — contextual token-level embeddings pooled at chunk boundaries.
 
-Key idea
---------
-Regular chunking embeds each chunk in isolation → "information island" effect.
-Late chunking instead:
-  1. Passes the ENTIRE document through jina-embeddings-v3 (8192-token context
-     window) so every token embedding is already aware of the whole document.
-  2. Defines fixed-size chunk boundaries on the raw text.
-  3. Mean-pools the token hidden-states that fall inside each chunk boundary.
-
-Result: every chunk embedding carries full-document context.
-
-Model source: HuggingFace — jinaai/jina-embeddings-v3  (~2 GB)
-Stored at:    app/late_chunking/embed_model/
+Two modes
+---------
+fixed   : classic late chunking — fixed chunk size, then pool token embeddings.
+semantic: context-aware late chunking — use the token embeddings themselves to
+          detect where the context shifts (cosine similarity drop between
+          adjacent sentences), then pool tokens per detected chunk.
+          No fixed size limit — chunks follow natural topic boundaries.
 """
-from pathlib import Path
 
-MODEL_PATH = Path(__file__).parent / "embed_model"
+MODEL_ID = "jinaai/jina-embeddings-v3"
 
-# Lazy singletons — loaded once on first call, reused forever.
 _tokenizer = None
 _base_model = None
 
@@ -27,34 +19,36 @@ _base_model = None
 # ── public API ─────────────────────────────────────────────────────────────────
 
 def model_available() -> bool:
-    """True if the model weights are present on disk."""
-    return (MODEL_PATH / "config.json").exists() and (
-        (MODEL_PATH / "model.safetensors").exists()
-        or (MODEL_PATH / "pytorch_model.bin").exists()
-    )
+    try:
+        from huggingface_hub import try_to_load_from_cache, _CACHED_NO_EXIST
+        result = try_to_load_from_cache(MODEL_ID, "config.json")
+        if result is None or result is _CACHED_NO_EXIST:
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def chunk_and_embed(
     text: str,
     chunk_size: int = 500,
     overlap_chars: int = 50,
+    snap_boundary: str = "none",  # "none" | "word" | "sentence"
+    mode: str = "fixed",          # "fixed" | "semantic"
+    similarity_threshold: float = 0.85,
 ) -> list[dict]:
     """
-    Chunk text using fixed-size boundaries, embed with full-document context.
+    Embed text with full-document context, split at chunk boundaries.
 
-    Returns list of dicts:
-      { text, tok_start, tok_end, total_doc_tokens, embedding }
+    mode="fixed"    — fixed chunk_size boundaries (classic late chunking).
+    mode="semantic" — boundaries detected from cosine similarity drops between
+                      adjacent sentence embeddings; chunk_size is ignored.
     """
     import torch
 
     tokenizer, base_model = _load_model()
 
-    # Step 1 — fixed chunk boundaries (char-level)
-    chunks_text = _fixed_chunks(text, chunk_size, overlap_chars)
-    if not chunks_text:
-        return []
-
-    # Step 2 — tokenize full document, capture char↔token offset map
+    # Tokenize full document once
     encoding = tokenizer(
         text,
         return_tensors="pt",
@@ -63,27 +57,29 @@ def chunk_and_embed(
         return_offsets_mapping=True,
         padding=False,
     )
-    offset_mapping = encoding.pop("offset_mapping")[0].tolist()  # [(char_s, char_e)]
+    offset_mapping = encoding.pop("offset_mapping")[0].tolist()
     total_tokens = encoding["input_ids"].shape[1]
 
-    # Step 3 — forward pass on full document
+    # Single forward pass — all token embeddings carry full-document context
     with torch.no_grad():
         output = base_model(**encoding)
     token_emb = output.last_hidden_state[0]  # [seq_len, 1024]
 
-    # Step 4 — per chunk: find token span via offset map, mean-pool
+    if mode == "semantic":
+        chunk_spans = _semantic_spans(text, token_emb, offset_mapping, similarity_threshold)
+    else:
+        chunk_spans = _fixed_spans(text, chunk_size, overlap_chars, snap_boundary)
+
+    # Pool token embeddings per chunk span
     results = []
-    search_from = 0
-    for chunk_txt in chunks_text:
-        char_start = text.find(chunk_txt, search_from)
-        if char_start == -1:
-            char_start = search_from
-        char_end = char_start + len(chunk_txt)
-        search_from = char_start + 1
+    for char_start, char_end in chunk_spans:
+        chunk_txt = text[char_start:char_end].strip()
+        if not chunk_txt:
+            continue
 
         tok_idx = [
             i for i, (cs, ce) in enumerate(offset_mapping)
-            if ce > char_start and cs < char_end and cs != ce  # skip special tokens
+            if ce > char_start and cs < char_end and cs != ce
         ]
 
         if tok_idx:
@@ -106,6 +102,107 @@ def chunk_and_embed(
 
 # ── internals ──────────────────────────────────────────────────────────────────
 
+def _fixed_spans(
+    text: str,
+    chunk_size: int,
+    overlap_chars: int,
+    snap: str = "none",
+) -> list[tuple[int, int]]:
+    import re
+    overlap_chars = max(0, min(overlap_chars, chunk_size - 1))
+    spans, start = [], 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        # Snap end to nearest boundary (only when not at EOF)
+        if end < len(text):
+            if snap == "word":
+                # Walk forward to end of current word
+                while end < len(text) and text[end] not in " \n\t\r":
+                    end += 1
+            elif snap == "sentence":
+                # Find the next sentence-ending punctuation after 'end'
+                m = re.search(r"[.!?][\"')\]]*\s", text[end:])
+                if m:
+                    end = end + m.end()
+                else:
+                    end = len(text)
+        spans.append((start, end))
+        if end >= len(text):
+            break
+        start = end - overlap_chars
+    return spans
+
+
+def _semantic_spans(
+    text: str,
+    token_emb,        # torch.Tensor [seq_len, dim]
+    offset_mapping: list,
+    threshold: float,
+) -> list[tuple[int, int]]:
+    """
+    Split text at sentence boundaries where the context shifts.
+
+    Steps:
+      1. Split text into sentences.
+      2. Map each sentence to its token span via offset_mapping.
+      3. Mean-pool token embeddings per sentence → sentence vector.
+      4. Compute cosine similarity between consecutive sentence vectors.
+      5. Split into a new chunk where similarity < threshold.
+    """
+    import re
+    import torch
+    import torch.nn.functional as F
+
+    # Split into sentences preserving their char offsets
+    sentence_spans = []
+    for m in re.finditer(r'[^.!?\n]+(?:[.!?]+|\n|$)', text):
+        s, e = m.start(), m.end()
+        if text[s:e].strip():
+            sentence_spans.append((s, e))
+
+    if not sentence_spans:
+        return [(0, len(text))]
+
+    # Mean-pool token embeddings per sentence
+    sent_vecs = []
+    for char_s, char_e in sentence_spans:
+        tok_idx = [
+            i for i, (cs, ce) in enumerate(offset_mapping)
+            if ce > char_s and cs < char_e and cs != ce
+        ]
+        if tok_idx:
+            vec = token_emb[tok_idx[0]:tok_idx[-1] + 1].mean(dim=0)
+        else:
+            vec = token_emb.mean(dim=0)
+        sent_vecs.append(vec)
+
+    # Cosine similarity between consecutive sentences
+    sims = []
+    for i in range(len(sent_vecs) - 1):
+        sim = F.cosine_similarity(
+            sent_vecs[i].unsqueeze(0),
+            sent_vecs[i + 1].unsqueeze(0),
+        ).item()
+        sims.append(sim)
+
+    # Group sentences into chunks: split wherever similarity < threshold
+    chunk_spans = []
+    chunk_start_idx = 0
+    for i, sim in enumerate(sims):
+        if sim < threshold:
+            char_s = sentence_spans[chunk_start_idx][0]
+            char_e = sentence_spans[i][1]
+            chunk_spans.append((char_s, char_e))
+            chunk_start_idx = i + 1
+
+    # Last chunk
+    char_s = sentence_spans[chunk_start_idx][0]
+    char_e = sentence_spans[-1][1]
+    chunk_spans.append((char_s, char_e))
+
+    return chunk_spans
+
+
 def _load_model():
     global _tokenizer, _base_model
     if _base_model is not None:
@@ -113,7 +210,7 @@ def _load_model():
 
     if not model_available():
         raise RuntimeError(
-            "jina-embeddings-v3 not found in late_chunking/embed_model/. "
+            "jina-embeddings-v3 not found in HuggingFace Hub cache. "
             "Open Settings → Download model to fetch it first (~2 GB)."
         )
     try:
@@ -124,24 +221,12 @@ def _load_model():
             "Rebuild the Docker container after adding it to requirements.txt."
         )
 
-    # SentenceTransformer handles the custom_st.py module loading automatically.
-    st = SentenceTransformer(str(MODEL_PATH), trust_remote_code=True)
+    from huggingface_hub import snapshot_download
+    local_path = snapshot_download(MODEL_ID, local_files_only=True)
+    st = SentenceTransformer(local_path, trust_remote_code=True)
     st.eval()
 
-    # We only need the underlying HuggingFace model + tokenizer for token-level output.
-    transformer_module = st[0]          # custom_st.Transformer wrapper
+    transformer_module = st[0]
     _tokenizer = transformer_module.tokenizer
     _base_model = transformer_module.auto_model
     return _tokenizer, _base_model
-
-
-def _fixed_chunks(text: str, chunk_size: int, overlap_chars: int) -> list[str]:
-    chunks, start = [], 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        ov = min(overlap_chars, end - start - 1)
-        start = end - ov if ov > 0 else end
-    return chunks

@@ -81,8 +81,66 @@ export default function StrategyParams({ strategy, params, update }: Props) {
           <label style={{ marginTop: '0.6rem' }}>Embed model (similarity)</label>
           <select value={params.semanticEmbedModel} onChange={e => update('semanticEmbedModel', e.target.value)}>
             <option value="bge-m3">bge-m3 (Ollama)</option>
-            <option value="nomic-embed-text">nomic-embed-text (Ollama)</option>
           </select>
+        </div>
+      )}
+
+      {/* ── late-chunk: all late-chunking params in one panel ── */}
+      {panels.includes('late-chunk') && (
+        <div className="param-group">
+          <label>Chunking mode</label>
+          <select value={params.lateChunkMode} onChange={e => update('lateChunkMode', e.target.value)}>
+            <option value="fixed">Fixed size</option>
+            <option value="semantic">Context-aware (auto boundaries)</option>
+          </select>
+
+          {params.lateChunkMode === 'fixed' && (
+            <>
+              <label style={{ marginTop: '0.8rem' }}>Chunk size (chars)</label>
+              <input
+                type="number" min={50} max={4000}
+                value={params.chunkSize}
+                onChange={e => update('chunkSize', Number(e.target.value))}
+              />
+
+              <label style={{ marginTop: '0.6rem' }}>Overlap type</label>
+              <select value={params.overlapType} onChange={e => update('overlapType', e.target.value)}>
+                <option value="chars">Characters</option>
+                <option value="words">Words</option>
+                <option value="sentences">Sentences</option>
+              </select>
+
+              <label style={{ marginTop: '0.6rem' }}>Overlap amount</label>
+              <input
+                type="number" min={0} max={500}
+                value={params.overlapValue}
+                onChange={e => update('overlapValue', Number(e.target.value))}
+              />
+
+              <label style={{ marginTop: '0.6rem' }}>Boundary snap</label>
+              <select value={params.snapBoundary} onChange={e => update('snapBoundary', e.target.value)}>
+                <option value="none">None — hard cut</option>
+                <option value="word">Snap to full word</option>
+                <option value="sentence">Snap to full sentence</option>
+              </select>
+              <p className="param-hint">Extend the chunk end to the nearest word or sentence boundary.</p>
+            </>
+          )}
+
+          {params.lateChunkMode === 'semantic' && (
+            <>
+              <label style={{ marginTop: '0.8rem' }}>Split threshold (%)</label>
+              <input
+                type="number" min={50} max={99} step={1}
+                value={params.percentileThreshold}
+                onChange={e => update('percentileThreshold', Number(e.target.value))}
+              />
+              <p className="param-hint">
+                Split where cosine similarity between adjacent sentences &lt; threshold ÷ 100.
+                87 → split below 0.87. Higher = more chunks, finer boundaries.
+              </p>
+            </>
+          )}
         </div>
       )}
 
@@ -137,7 +195,6 @@ export default function StrategyParams({ strategy, params, update }: Props) {
           <label style={{ marginTop: '0.6rem' }}>Embed model</label>
           <select value={params.paraSemEmbedModel} onChange={e => update('paraSemEmbedModel', e.target.value)}>
             <option value="bge-m3">bge-m3 (Ollama)</option>
-            <option value="nomic-embed-text">nomic-embed-text (Ollama)</option>
           </select>
         </div>
       )}
