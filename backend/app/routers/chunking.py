@@ -1,9 +1,11 @@
 import time
+import logging
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from app.services.chunking import chunk_text
 from app.services.parsers import parse_file
 
 router = APIRouter()
+log = logging.getLogger("research_ai")
 
 
 @router.post("/")
@@ -35,6 +37,10 @@ async def chunk_document(
     content = await file.read()
     text = parse_file(content, file.filename or "", pdf_mode=pdf_mode)
 
+    log.info(
+        "[CHUNK] request | file=%s | strategy=%s | chunk_size=%s | overlap=%s/%s | snap=%s | pdf=%s",
+        file.filename, strategy, chunk_size, overlap_type, overlap_value, snap_boundary, pdf_mode,
+    )
     try:
         t0 = time.perf_counter()
         chunks = chunk_text(
@@ -55,8 +61,13 @@ async def chunk_document(
         )
         processing_time_ms = round((time.perf_counter() - t0) * 1000)
     except ValueError as e:
+        log.error("[CHUNK] error | file=%s | strategy=%s | %s", file.filename, strategy, e)
         raise HTTPException(400, str(e))
 
+    log.info(
+        "[CHUNK] done  | file=%s | strategy=%s | chunks=%d | time=%dms",
+        file.filename, strategy, len(chunks), processing_time_ms,
+    )
     return {
         "filename": file.filename,
         "strategy": strategy,

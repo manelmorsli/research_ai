@@ -5,6 +5,7 @@ interface Props {
   results: ChunkResponse | EmbedResponse | null
   mode: Mode
   strategy: string
+  activeEmbedModel: string | null
   loading: boolean
   error: string | null
   viewMode: ViewMode
@@ -16,7 +17,7 @@ function fmtMs(ms: number) {
 }
 
 export default function ResultsPanel({
-  results, mode, strategy, loading, error, viewMode, setViewMode,
+  results, mode, strategy, activeEmbedModel, loading, error, viewMode, setViewMode,
 }: Props) {
   const items = results
     ? (mode === 'embed' && 'results' in results ? results.results : 'chunks' in results ? results.chunks : [])
@@ -29,7 +30,6 @@ export default function ResultsPanel({
 
   const embedMs = results && 'embedding_time_ms' in results ? results.embedding_time_ms : undefined
   const embedDim = results && 'embedding_dim' in results ? results.embedding_dim : undefined
-  const embedModel = results && 'embed_model' in results ? results.embed_model : undefined
 
   return (
     <main className="results-panel">
@@ -57,9 +57,9 @@ export default function ResultsPanel({
               Dim: <strong>{embedDim}</strong>
             </span>
           )}
-          {embedModel && (
+          {activeEmbedModel && (
             <span className="toolbar-stat model-tag">
-              {embedModel.startsWith('jina:') ? '🤗' : '🦙'} {embedModel.replace('ollama:', '').replace('jina:', '')}
+              {activeEmbedModel.startsWith('jina:') ? '🤗' : '🦙'} {activeEmbedModel.replace('ollama:', '').replace('jina:', '')}
             </span>
           )}
           <div className="view-toggle">

@@ -124,7 +124,7 @@ export default function Sidebar({
       )}
 
       {/* ── embed model (embed mode only) ── */}
-      {mode === 'embed' && strategy !== 'late-chunking' && (
+      {mode === 'embed' && !['late-chunking', 'semantic', 'hybrid-sem-hier', 'hybrid-para-sem'].includes(strategy) && (
         <section>
           <label className="sidebar-label">Embedding model</label>
           <select className="sidebar-select" value={params.embedModel}

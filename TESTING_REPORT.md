@@ -267,7 +267,7 @@ Expected: very fine-grained splits at any slight topic change.
 **Observations:**  
 _Semantic chunking performs noticeably better on clean, structured documents (e.g. Markdown) than on raw PDF-extracted text. On Markdown, topic-shift boundaries align with actual section changes, producing coherent chunks. On PDFs, noisy extraction artifacts (headers, footers, metadata lines, broken sentences) distort the sentence-level similarity signal, causing boundaries to appear at arbitrary positions unrelated to real topic shifts. The strategy is therefore effective when the input text is well-formed, but unreliable on PDF sources without prior cleaning. Adjusting the break percentile (50–70) can reduce fragmentation, but does not compensate for noisy input._
 
-**Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+**Result:** [x] Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -303,7 +303,7 @@ Expected: more children per parent, finer granularity.
 **Observations:**  
 _The hierarchical strategy introduces significant memory overhead by storing the full parent text inside every child chunk, resulting in high duplication across the output. The parent-child relationship provides little retrieval benefit when the parent boundaries are defined purely by fixed character size rather than semantic or structural boundaries — the "context" carried by the parent is arbitrary rather than meaningful. Increasing the parent size (2048) while reducing the child size (128) amplifies this problem: more children share the same large parent block, and the parent text becomes too broad to add useful context for any individual child. This strategy is only worth considering when parent boundaries are derived from document structure (e.g. sections or topics), not from fixed sizes._
 
-**Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+**Result:** ☐ Pass &nbsp;&nbsp; [x] Fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -332,9 +332,9 @@ Each paragraph chunk is enriched with 1–2 sentences of LLM-generated context t
 
 
 **Observations:**  
-_Add your notes here after testing._
+_This strategy is useful for enriching chunks with LLM-generated context, but the inference cost is high — the LLM is called once per chunk, so total time scales linearly with chunk count. This is a poor trade-off when the source document has little semantic content or structure, since the LLM inference time is paid even for chunks that carry no meaningful information. Best reserved for well-structured, content-rich documents where the added context genuinely improves retrieval._
 
-**Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+**Result:** [x] Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -362,22 +362,22 @@ The full document is tokenized and passed through `jina-embeddings-v3` (8192-tok
 - Embedding preview shows 8 of the 1024 dimensions
 - Processing time is longer (full model forward pass on entire document)
 
-**Screenshot — chunk-only mode (boundary preview):**
+**Screenshot — Fixed size mode (fixed to 1000 caracters):**
 
 ![Late chunking — chunk-only mode](screenshots/08_late_chunk_only.png)
 
-**Screenshot — embed mode (contextual embeddings):**
+**Screenshot — Contextual mode/ Auto-boundries (contextual embeddings 60%):**
 
-![Late chunking — embed mode](screenshots/08_late_embed_mode.png)
+![Late chunking — embed mode](screenshots/08_late_embed_mode_60.png)
 
-**Screenshot — Settings drawer (model status):**
+**Screenshot — Contextual mode/ Auto-boundries (contextual embeddings 75%):**
 
-![Late chunking — settings model download](screenshots/08_late_settings.png)
+![Late chunking — contextual mode 75%](screenshots/08_late_embed_mode_75.png)
 
 **Observations:**  
-_Add your notes here after testing._
+_Late chunking is a strong strategy overall, but fixed-size mode is not well-suited to it — arbitrary character boundaries dilute the contextual benefit of full-document token pooling. With context-aware (semantic) mode, results are noticeably better: chunk boundaries follow natural topic shifts, and the full document is encoded in a single forward pass. Performance-wise, this is the best strategy tested so far — it embeds once and computes similarity in the same pass, averaging around 150s per document for the test file used. Other strategies that call the embedding model per chunk take roughly double the time combined for chunking and embedding._
 
-**Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+**Result:** [x] Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -485,7 +485,7 @@ First applies semantic chunking to create context-aware parent chunks (topic-bas
 
 **Screenshot:**
 
-![Hybrid Semantic→Hierarchical](screenshots/09_hybrid_sem_hier.png)
+![Hybrid Semantic→Hierarchical](screenshots/11_hybrid_sem_hier.png)
 
 **Observations:**  
 _Add your notes here after testing._
@@ -517,7 +517,7 @@ Applies recursive splitting (structure-aware), then enriches each chunk with LLM
 
 **Screenshot:**
 
-![Hybrid Recursive→Contextual](screenshots/10_hybrid_rec_ctx.png)
+![Hybrid Recursive→Contextual](screenshots/12_hybrid_rec_ctx.png)
 
 **Observations:**  
 _Add your notes here after testing._
@@ -547,19 +547,19 @@ Starts with natural paragraph splits, then merges adjacent paragraphs if their c
 
 **Screenshot — default threshold (0.85):**
 
-![Hybrid Paragraph→Semantic merge — 0.85](screenshots/11_hybrid_para_sem_085.png)
+![Hybrid Paragraph→Semantic merge — 0.85](screenshots/13_hybrid_para_sem_085.png)
 
 **Test — high threshold (0.95, less merging):**
 
 Expected: fewer merges, more standalone paragraphs.
 
-![Hybrid Paragraph→Semantic merge — 0.95](screenshots/11_hybrid_para_sem_095.png)
+![Hybrid Paragraph→Semantic merge — 0.95](screenshots/13_hybrid_para_sem_095.png)
 
 **Test — low threshold (0.70, aggressive merging):**
 
 Expected: larger chunks, many paragraphs merged together.
 
-![Hybrid Paragraph→Semantic merge — 0.70](screenshots/11_hybrid_para_sem_070.png)
+![Hybrid Paragraph→Semantic merge — 0.70](screenshots/13_hybrid_para_sem_070.png)
 
 **Observations:**  
 _Add your notes here after testing._

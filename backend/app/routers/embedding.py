@@ -1,10 +1,12 @@
 import time
+import logging
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from app.services.chunking import chunk_text
 from app.services.embedding import embed_chunks
 from app.services.parsers import parse_file
 
 router = APIRouter()
+log = logging.getLogger("research_ai")
 
 
 @router.post("/")
@@ -41,26 +43,33 @@ async def embed_document(
 
     # ── late-chunking: full-doc token embeddings via jina-embeddings-v3 ─────────
     if chunk_strategy == "late-chunking":
+        log.info(
+            "[EMBED] request | file=%s | strategy=late-chunking | mode=%s | chunk_size=%s | overlap=%s/%s | threshold=%.2f | pdf=%s",
+            file.filename, late_chunk_mode, chunk_size, overlap_type, overlap_value, percentile_threshold / 100, pdf_mode,
+        )
         try:
             from app.late_chunking.late_chunking import chunk_and_embed
         except ImportError as e:
+            log.error("[EMBED] import error | late-chunking | %s", e)
             raise HTTPException(500, str(e))
         try:
             t0 = time.perf_counter()
             raw = chunk_and_embed(
                 text,
                 chunk_size=chunk_size,
-                overlap_chars=overlap_value,
+                overlap_type=overlap_type,
+                overlap_value=overlap_value,
                 snap_boundary=snap_boundary,
                 mode=late_chunk_mode,
                 similarity_threshold=percentile_threshold / 100,
             )
             elapsed_ms = round((time.perf_counter() - t0) * 1000)
         except RuntimeError as e:
+            log.error("[EMBED] error | file=%s | strategy=late-chunking | %s", file.filename, e)
             raise HTTPException(400, str(e))
         except Exception as e:
-            import traceback, logging
-            logging.error("late-chunking error: %s\n%s", e, traceback.format_exc())
+            import traceback
+            log.error("[EMBED] error | file=%s | strategy=late-chunking | %s\n%s", file.filename, e, traceback.format_exc())
             raise HTTPException(500, f"Late chunking failed: {type(e).__name__}: {e}")
 
         indexed = [{"index": i, **r} for i, r in enumerate(raw)]
@@ -72,6 +81,10 @@ async def embed_document(
             }
             for item in indexed
         ]
+        log.info(
+            "[EMBED] done  | file=%s | strategy=late-chunking | model=jina-v3 | chunks=%d | time=%dms",
+            file.filename, len(results), elapsed_ms,
+        )
         return {
             "filename": file.filename,
             "chunk_strategy": chunk_strategy,
@@ -84,6 +97,10 @@ async def embed_document(
         }
 
     # ── all other strategies ──────────────────────────────────────────────────
+    log.info(
+        "[EMBED] request | file=%s | strategy=%s | model=%s | chunk_size=%s | overlap=%s/%s | pdf=%s",
+        file.filename, chunk_strategy, embed_model, chunk_size, overlap_type, overlap_value, pdf_mode,
+    )
     try:
         t0 = time.perf_counter()
         chunks = chunk_text(
@@ -104,6 +121,7 @@ async def embed_document(
         )
         chunking_time_ms = round((time.perf_counter() - t0) * 1000)
     except ValueError as e:
+        log.error("[EMBED] error | file=%s | strategy=%s | chunking failed | %s", file.filename, chunk_strategy, e)
         raise HTTPException(400, str(e))
 
     texts = [c.get("contextualized_text", c["text"]) for c in chunks]
@@ -111,6 +129,10 @@ async def embed_document(
     embeddings = embed_chunks(texts, model=embed_model)
     embedding_time_ms = round((time.perf_counter() - t1) * 1000)
 
+    log.info(
+        "[EMBED] done  | file=%s | strategy=%s | model=%s | chunks=%d | chunk_time=%dms | embed_time=%dms",
+        file.filename, chunk_strategy, embed_model, len(chunks), chunking_time_ms, embedding_time_ms,
+    )
     results = [{**chunk, "embedding_preview": emb[:8], "embedding_norm": round(sum(v**2 for v in emb)**0.5, 4)}
                for chunk, emb in zip(chunks, embeddings)]
 

@@ -32,9 +32,10 @@ def model_available() -> bool:
 def chunk_and_embed(
     text: str,
     chunk_size: int = 500,
-    overlap_chars: int = 50,
-    snap_boundary: str = "none",  # "none" | "word" | "sentence"
-    mode: str = "fixed",          # "fixed" | "semantic"
+    overlap_type: str = "chars",   # "chars" | "words" | "sentences"
+    overlap_value: int = 50,
+    snap_boundary: str = "none",   # "none" | "word" | "sentence"
+    mode: str = "fixed",           # "fixed" | "semantic"
     similarity_threshold: float = 0.85,
 ) -> list[dict]:
     """
@@ -68,7 +69,7 @@ def chunk_and_embed(
     if mode == "semantic":
         chunk_spans = _semantic_spans(text, token_emb, offset_mapping, similarity_threshold)
     else:
-        chunk_spans = _fixed_spans(text, chunk_size, overlap_chars, snap_boundary)
+        chunk_spans = _fixed_spans(text, chunk_size, overlap_type, overlap_value, snap_boundary)
 
     # Pool token embeddings per chunk span
     results = []
@@ -105,22 +106,32 @@ def chunk_and_embed(
 def _fixed_spans(
     text: str,
     chunk_size: int,
-    overlap_chars: int,
+    overlap_type: str = "chars",
+    overlap_value: int = 50,
     snap: str = "none",
 ) -> list[tuple[int, int]]:
     import re
-    overlap_chars = max(0, min(overlap_chars, chunk_size - 1))
+
+    def _overlap_len(chunk_text: str) -> int:
+        if not chunk_text or overlap_value <= 0:
+            return 0
+        if overlap_type == "words":
+            words = chunk_text.split()
+            return len(" ".join(words[-overlap_value:])) if words else 0
+        elif overlap_type == "sentences":
+            sents = re.split(r"(?<=[.!?])\s+", chunk_text)
+            return len(" ".join(sents[-overlap_value:])) if sents else 0
+        else:  # chars
+            return min(overlap_value, len(chunk_text))
+
     spans, start = [], 0
     while start < len(text):
         end = min(start + chunk_size, len(text))
-        # Snap end to nearest boundary (only when not at EOF)
         if end < len(text):
             if snap == "word":
-                # Walk forward to end of current word
                 while end < len(text) and text[end] not in " \n\t\r":
                     end += 1
             elif snap == "sentence":
-                # Find the next sentence-ending punctuation after 'end'
                 m = re.search(r"[.!?][\"')\]]*\s", text[end:])
                 if m:
                     end = end + m.end()
@@ -129,7 +140,9 @@ def _fixed_spans(
         spans.append((start, end))
         if end >= len(text):
             break
-        start = end - overlap_chars
+        oc = _overlap_len(text[start:end])
+        oc = max(0, min(oc, end - start - 1))
+        start = end - oc if oc else end
     return spans
 
 
