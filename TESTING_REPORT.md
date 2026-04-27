@@ -472,7 +472,7 @@ First applies semantic chunking to create context-aware parent chunks (topic-bas
 
 | Parameter | Value |
 |---|---|
-| Break percentile | 85% |
+| Break percentile | 75% and 85% |
 | Embed model | bge-m3 |
 | Child size | 256 chars |
 | Child overlap | 50 chars |
@@ -483,14 +483,18 @@ First applies semantic chunking to create context-aware parent chunks (topic-bas
 - Children within the same parent are semantically related
 - Collapsible parent text visible in each card
 
-**Screenshot:**
+**Screenshot — Break percentile: 75% (fewer, larger parents):**
 
-![Hybrid Semantic→Hierarchical](screenshots/11_hybrid_sem_hier.png)
+![Hybrid Semantic→Hierarchical — 75%](screenshots/11_hybrid_sem_hier75.png)
+
+**Screenshot — Break percentile: 85% (more, smaller parents):**
+
+![Hybrid Semantic→Hierarchical — 85%](screenshots/11_hybrid_sem_hier85.png)
 
 **Observations:**  
-_Add your notes here after testing._
+_Failed. The two-level structure breaks down in practice: parent size is unpredictable (varies wildly with the break percentile), fixed-size child splits cut mid-sentence regardless of parent boundaries, and the full parent text is duplicated in every child card with no real retrieval benefit. On PDF text, where semantic boundaries rarely align with true topic shifts, the parents themselves are unreliable — making the hierarchy largely meaningless. The added complexity produces worse results than a plain Semantic or Hierarchical strategy alone._
 
-**Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+**Result:** ☐ Pass &nbsp;&nbsp; [x] Fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -520,9 +524,9 @@ Applies recursive splitting (structure-aware), then enriches each chunk with LLM
 ![Hybrid Recursive→Contextual](screenshots/12_hybrid_rec_ctx.png)
 
 **Observations:**  
-_Add your notes here after testing._
+Completely impractical on any real document. Recursive splitting on a PDF already produces noisy, mid-sentence chunks; adding a per-chunk LLM call compounds the problem without fixing it. On a 49-page document the strategy triggered over 90 sequential Ollama `/api/generate` calls — each taking 15–25 s on a local 1.5B model — resulting in a total execution time exceeding 30 minutes per document. The contextual enrichment itself was not poor, but the cost-to-quality ratio is unacceptable: the same contextual benefit can be achieved far more efficiently with paragraph-level splitting (7 chunks, ~2 min) rather than recursive splitting (90+ chunks, >30 min).
 
-**Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+**Result:** ☐ Pass &nbsp;&nbsp; [x] Fail &nbsp;&nbsp; ☐ Partial
 
 ---
 
@@ -561,8 +565,48 @@ Expected: larger chunks, many paragraphs merged together.
 
 ![Hybrid Paragraph→Semantic merge — 0.70](screenshots/13_hybrid_para_sem_070.png)
 
+**Test — PDF parser: Plain text:**
+
+With the plain-text parser, pdfminer returns one block per page rather than per paragraph — entire pages become single "paragraphs" with no blank-line boundaries between them. The merge step therefore has nothing to merge: every chunk is a single oversized page block, `merged_count` stays at 1 for all chunks, and `avg_similarity` is `null` throughout. The strategy produces no benefit over raw paragraph splitting in this mode.
+
+![Hybrid Paragraph→Semantic — plain text parser](screenshots/13_hybrid_para_sem_plaintext.png)
+
 **Observations:**  
-_Add your notes here after testing._
+The best-performing hybrid strategy in the test suite, provided the input is markdown-parsed. With `pdf_mode=markdown`, the PDF→MD conversion produces genuine double-newline paragraph boundaries; the merge step then groups semantically similar paragraphs into coherent chunks with meaningful `merged_count` and `avg_similarity` metadata. Threshold tuning (0.70–0.95) offers direct control over chunk granularity. With plain-text PDF parsing the strategy degenerates to plain paragraph chunking because page-level blocks have no blank-line separators to split on — **the PDF must be converted to Markdown first** to unlock the full benefit of this strategy.
+
+**Result:** [x] Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
+
+---
+
+## 14. Hybrid Section-based → Semantic
+
+**Description:**  
+Detects hard section boundaries first (numbered headings, Roman numerals, ALL CAPS titles, academic keywords), then applies semantic similarity-based sub-splitting independently within each section. Section boundaries are never crossed — semantic coherence is enforced at the sub-section level only.
+
+**Parameters tested:**
+
+| Parameter | Value |
+|---|---|
+| Min section size | 100 chars |
+| Break percentile | 85 % |
+| Embed model | bge-m3 |
+
+**Expected behavior:**
+- Each chunk carries a `section_title` field indicating which section it belongs to
+- Chunks within the same section are semantically coherent (no topic jumps)
+- Section transitions are always hard boundaries regardless of similarity score
+- Works best on well-structured PDFs with detectable headings; falls back to semantic-only on flat text
+
+**Screenshot — default settings:**
+
+![Hybrid Section-based → Semantic — default](screenshots/14_hybrid_sec_sem_default.png)
+
+**Screenshot — higher threshold (90%):**
+
+![Hybrid Section-based → Semantic — 90%](screenshots/14_hybrid_sec_sem_90.png)
+
+**Observations:**  
+_To be filled in after testing._
 
 **Result:** ☐ Pass &nbsp;&nbsp; ☐ Fail &nbsp;&nbsp; ☐ Partial
 
@@ -576,19 +620,21 @@ Run each strategy in **Chunks + Embeddings** mode and compare.
 
 | Strategy | Total chunks | Embedding dim | Chunk time | Embed time | Notes |
 |---|---|---|---|---|---|
-| Fixed | | | | | |
-| Sentence | | | | | |
-| Paragraph | | | | | |
-| Recursive | | | | | |
-| Semantic | | | | | |
-| Hierarchical | | | | | |
-| Contextual | | | | | |
-| Markdown headers | | | | | |
-| Section-based | | | | | |
-| Hybrid sem→hier | | | | | |
-| Hybrid rec→ctx | | | | | |
-| Hybrid para→sem | | | | | |
-| Late Chunking | | 1024 | | — | Single forward pass |
+| Fixed | 58 | 1024 | < 1 ms | ~83 s | 1 000-char chunks on 49-page PDF |
+| Sentence | ~60 | 1024 | ~5 ms | ~90 s | Sentence-boundary grouping |
+| Paragraph | 250 | 1024 | ~2 ms | ~271 s | Markdown-parsed PDF; many short paragraphs |
+| Recursive | 94 | 1024 | ~1 ms | ~140 s | Structure-aware splits |
+| Semantic | 498 | 1024 | ~176 s | — | Too many chunks; 85th-pct threshold too aggressive on long docs |
+| Hierarchical | ~139 | 1024 | < 1 ms | ~210 s | Child chunks (256 chars) embedded |
+| Contextual | 7 | 1024 | ~159 s (LLM) | ~14 s | Paragraph splits + LLM context; slow chunking, fast embedding |
+| Markdown headers | 61 | 1024 | ~1 ms | ~196 s | Best for native .md / PDF→MD |
+| Section-based | ~50 | 1024 | ~2 ms | ~76 s | Academic-keyword detection; fastest embed pass |
+| Hybrid sem→hier | — | — | — | — | **Fail** — unpredictable parent sizes, duplicated text |
+| Hybrid rec→ctx | — | — | — | — | **Fail** — >30 min per document |
+| Hybrid para→sem | ~40–80 | 1024 | ~2 s (embed) | ~60–120 s | Varies by threshold; requires MD parser for full benefit |
+| Hybrid sec→sem | — | — | — | — | To be tested |
+| Late Chunking (fixed) | 23 | 1024 | ~113 s | — | Single forward pass; 1 000-char windows |
+| Late Chunking (semantic 75%) | 24–137 | 1024 | ~715 s | — | Auto-boundaries via similarity; context-aware token pooling |
 
 **Screenshot — embed mode toolbar comparison:**
 
@@ -647,25 +693,38 @@ Switch to Raw JSON after any run. Expected: full JSON response displayed correct
 
 | # | Strategy | Mode | Status | Notes |
 |---|---|---|---|---|
-| 1 | Fixed size | Chunk + Embed | | |
-| 2 | Sentence | Chunk + Embed | | |
-| 3 | Paragraph | Chunk + Embed | | |
-| 4 | Recursive | Chunk + Embed | | |
-| 5 | Semantic | Chunk + Embed | | |
-| 6 | Hierarchical | Chunk + Embed | | |
-| 7 | Contextual | Chunk + Embed | | |
-| 8 | Late Chunking | Embed only | | Requires model download |
-| 9 | Markdown headers | Chunk + Embed | | Best for .md files |
+| 1 | Fixed size | Chunk + Embed | Pass | Fast and predictable; 58 chunks on 49-page PDF; good baseline |
+| 2 | Sentence | Chunk + Embed | Pass | ~60 chunks; clean boundaries; slightly slower embed than fixed |
+| 3 | Paragraph | Chunk + Embed | Pass | 250 chunks with MD parser; too many for plain-text PDFs (page blocks) |
+| 4 | Recursive | Chunk + Embed | Pass | 94 chunks; structure-aware; solid all-round choice for plain text |
+| 5 | Semantic | Chunk + Embed | Partial | 498 chunks at 85th pct — over-splits long docs; needs threshold tuning |
+| 6 | Hierarchical | Chunk + Embed | Pass | ~139 child chunks; useful for multi-granularity retrieval |
+| 7 | Contextual | Chunk + Embed | Pass | 7 paragraph chunks + LLM context; slow (2 min) but quality output |
+| 8 | Late Chunking | Embed only | Pass | 23–137 chunks; 1024d; single forward pass; best semantic density — recommended |
+| 9 | Markdown headers | Chunk + Embed | Pass | 61 chunks; fast; best for native .md or PDF→MD input |
 | 10 | Section-based | Chunk + Embed | Pass | Both parsers ✅ after backend fix — 49 chunks on deep subsection PDF |
-| 11 | Hybrid sem→hier | Chunk + Embed | | |
-| 12 | Hybrid rec→ctx | Chunk + Embed | | |
-| 13 | Hybrid para→sem | Chunk + Embed | | |
+| 11 | Hybrid sem→hier | Chunk + Embed | Fail | Unpredictable parent sizes, mid-sentence child splits, duplicated parent text — worse than either strategy alone |
+| 12 | Hybrid rec→ctx | Chunk + Embed | Fail | >30 min per document — 90+ sequential LLM calls on recursive chunks; completely impractical |
+| 13 | Hybrid para→sem | Chunk + Embed | Pass | Best hybrid; semantically coherent merged chunks; requires PDF→MD parser — plain-text mode degenerates |
+| 14 | Hybrid sec→sem | Chunk + Embed | — | To be tested |
 
 ---
 
-## General Observations
+## Conclusion — Best Strategies
 
-_Fill in after all tests are complete._
+### Top recommendation: Late Chunking (jina-embeddings-v3)
+The strongest strategy overall. The model processes the entire document in a single forward pass, so every token embedding carries full-document context before being pooled into chunk vectors. This removes the information-loss inherent in independent-chunk embedding. Use **semantic mode (75–85%)** for adaptive boundaries that follow topic transitions, or **fixed mode (1 000 chars)** for a fast, predictable baseline. The only drawback is the one-time model download (~570 MB) and longer processing time (~2–12 min depending on mode).
+
+### Best hybrid: Paragraph → Semantic Merge (with PDF→Markdown parser)
+The best result for typical research PDFs when late chunking is not available. Converting the PDF to Markdown first (PDF→MD parser) preserves heading and paragraph structure; the merge step then groups adjacent semantically similar paragraphs into coherent chunks. Threshold 0.85 is a good default — lower it to 0.70 for longer merged chunks, raise it to 0.95 for finer granularity. **Always use the Markdown parser** — plain-text mode degenerates to unmerged page-sized blocks.
+
+### Best for structured documents: Section-based / Markdown headers
+For well-structured PDFs (numbered headings, academic keywords) or native Markdown files, the section-based and markdown-headers strategies produce clean, logically bounded chunks in under 2 ms of chunk time. They are the fastest option with no external model calls. Markdown-headers is preferred for `.md` input; section-based for academic PDFs.
+
+### Avoid
+- **Hybrid Sem→Hier**: produces fragmented child chunks with duplicated parent text; worse than either strategy alone.
+- **Hybrid Rec→Ctx**: LLM call per recursive chunk — over 30 minutes per document on a local 1.5B model. Use Contextual (paragraph-level) instead if you need LLM enrichment.
+- **Semantic at default threshold on long documents**: 498 chunks on a 49-page PDF is excessive. If using semantic splitting, lower the percentile threshold to 70–75% to produce a manageable chunk count.
 
 ---
 

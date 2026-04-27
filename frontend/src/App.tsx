@@ -9,7 +9,7 @@ import type { Mode, ViewMode, RunParams, ChunkResponse, EmbedResponse } from './
 function getActiveEmbedModel(strategy: string, params: RunParams, mode: Mode): string | null {
   if (mode !== 'embed') return null
   if (strategy === 'late-chunking') return 'jina:jina-embeddings-v3'
-  if (strategy === 'semantic' || strategy === 'hybrid-sem-hier') return `ollama:${params.semanticEmbedModel}`
+  if (strategy === 'semantic' || strategy === 'hybrid-sem-hier' || strategy === 'hybrid-sec-sem') return `ollama:${params.semanticEmbedModel}`
   if (strategy === 'hybrid-para-sem') return `ollama:${params.paraSemEmbedModel}`
   return params.embedModel
 }

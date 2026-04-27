@@ -31,6 +31,7 @@ def chunk_text(text: str, strategy: str, **kw) -> list[dict]:
         "hybrid-sem-hier":   _hybrid_sem_hier,
         "hybrid-rec-ctx":    _hybrid_rec_ctx,
         "hybrid-para-sem":   _hybrid_para_sem,
+        "hybrid-sec-sem":    _hybrid_sec_sem,
         "late-chunking":     _late_chunking_preview,
         "markdown-headers":  _markdown_headers,
         "sections":          _sections,
@@ -187,11 +188,9 @@ def _contextual(
     text: str,
     overlap_type: str = "chars",
     overlap_value: int = 50,
-    llm_model: str = "qwen2.5:1.5b",
     **_,
 ) -> list[dict]:
-    base = [c["text"] for c in _paragraph(text, overlap_type, overlap_value)]
-    return _add_context(base, text[:1500], llm_model)
+    return _paragraph(text, overlap_type, overlap_value)
 
 
 # ── hybrid strategies ──────────────────────────────────────────────────────────
@@ -224,12 +223,10 @@ def _hybrid_rec_ctx(
     overlap_type: str = "chars",
     overlap_value: int = 50,
     snap_boundary: str = "none",
-    llm_model: str = "qwen2.5:1.5b",
     **_,
 ) -> list[dict]:
-    """Recursive structure-aware splitting + LLM contextual enrichment."""
-    base = [c["text"] for c in _recursive(text, chunk_size, overlap_type, overlap_value, snap_boundary)]
-    return _add_context(base, text[:1500], llm_model)
+    """Recursive structure-aware splitting. Context is added after embedding."""
+    return _recursive(text, chunk_size, overlap_type, overlap_value, snap_boundary)
 
 
 def _hybrid_para_sem(
@@ -266,6 +263,28 @@ def _hybrid_para_sem(
         }
         for g, s in groups
     ]
+
+
+def _hybrid_sec_sem(
+    text: str,
+    min_section_size: int = 100,
+    percentile_threshold: float = 85.0,
+    embed_model: str = "bge-m3",
+    **_,
+) -> list[dict]:
+    """Section detection first, then semantic sub-splitting within each section."""
+    sections = _sections(text, min_section_size)
+    result = []
+    for section in sections:
+        section_title = section.get("section_title", "")
+        sub_chunks = _semantic(section["text"], percentile_threshold, embed_model)
+        for sub in sub_chunks:
+            result.append({
+                "text": sub["text"],
+                "section_title": section_title,
+                "similarity_at_break": sub.get("similarity_at_break"),
+            })
+    return result
 
 
 # ── markdown header splitting ─────────────────────────────────────────────────

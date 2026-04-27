@@ -112,6 +112,12 @@ export const STRATEGY_CONFIG: Record<string, StrategyMeta> = {
     panels: ['section'],
     description: 'Detects numbered headings, Roman numerals, ALL CAPS titles, and academic keywords to split PDFs into logical sections.',
   },
+  'hybrid-sec-sem': {
+    label: 'Section-based → Semantic',
+    group: 'Hybrid',
+    panels: ['section', 'semantic'],
+    description: 'Detects section boundaries first, then applies semantic sub-splitting within each section. Combines document structure with semantic coherence.',
+  },
 }
 
 export const OVERLAP_DEFAULTS: Record<string, number> = {

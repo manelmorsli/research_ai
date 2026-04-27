@@ -124,14 +124,33 @@ async def embed_document(
         log.error("[EMBED] error | file=%s | strategy=%s | chunking failed | %s", file.filename, chunk_strategy, e)
         raise HTTPException(400, str(e))
 
-    texts = [c.get("contextualized_text", c["text"]) for c in chunks]
     t1 = time.perf_counter()
-    embeddings = embed_chunks(texts, model=embed_model)
+    embeddings = embed_chunks([c["text"] for c in chunks], model=embed_model)
     embedding_time_ms = round((time.perf_counter() - t1) * 1000)
+    log.info(
+        "[EMBED] embedded | file=%s | strategy=%s | chunks=%d | embed_time=%dms",
+        file.filename, chunk_strategy, len(chunks), embedding_time_ms,
+    )
+
+    # For contextual strategies, generate LLM context AFTER embedding
+    context_time_ms = 0
+    if chunk_strategy in ("contextual", "hybrid-rec-ctx"):
+        from app.services.chunking import _add_context
+        t2 = time.perf_counter()
+        ctx_results = _add_context([c["text"] for c in chunks], text[:1500], llm_model)
+        context_time_ms = round((time.perf_counter() - t2) * 1000)
+        for chunk, ctx in zip(chunks, ctx_results):
+            chunk["context"] = ctx["context"]
+            chunk["contextualized_text"] = ctx["contextualized_text"]
+            chunk["context_time_ms"] = ctx["context_time_ms"]
+        log.info(
+            "[EMBED] context  | file=%s | strategy=%s | chunks=%d | context_time=%dms",
+            file.filename, chunk_strategy, len(chunks), context_time_ms,
+        )
 
     log.info(
-        "[EMBED] done  | file=%s | strategy=%s | model=%s | chunks=%d | chunk_time=%dms | embed_time=%dms",
-        file.filename, chunk_strategy, embed_model, len(chunks), chunking_time_ms, embedding_time_ms,
+        "[EMBED] done  | file=%s | strategy=%s | model=%s | chunks=%d | chunk_time=%dms | embed_time=%dms | context_time=%dms",
+        file.filename, chunk_strategy, embed_model, len(chunks), chunking_time_ms, embedding_time_ms, context_time_ms,
     )
     results = [{**chunk, "embedding_preview": emb[:8], "embedding_norm": round(sum(v**2 for v in emb)**0.5, 4)}
                for chunk, emb in zip(chunks, embeddings)]
@@ -144,5 +163,6 @@ async def embed_document(
         "embedding_dim": len(embeddings[0]) if embeddings else 0,
         "chunking_time_ms": chunking_time_ms,
         "embedding_time_ms": embedding_time_ms,
+        "context_time_ms": context_time_ms if context_time_ms else None,
         "results": results,
     }
