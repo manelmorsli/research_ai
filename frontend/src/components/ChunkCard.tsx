@@ -25,7 +25,7 @@ export default function ChunkCard({ item, strategy, mode }: Props) {
   const isContextual = strategy === 'contextual' || strategy === 'hybrid-rec-ctx'
   const isHierarchical = strategy === 'hierarchical' || strategy === 'hybrid-sem-hier'
   const isLate = strategy === 'late-chunking'
-  const isSection = strategy === 'sections' || strategy === 'markdown-headers'
+  const isSection = strategy === 'sections' || strategy === 'markdown-headers' || strategy === 'hybrid-sec-sem'
 
   return (
     <div className="chunk-card">
