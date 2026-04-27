@@ -1,0 +1,186 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Research AI Lab — GitLab CI/CD Pipeline
+#
+# Stages:
+#   check  → type-check frontend  +  lint backend Python
+#   build  → Docker images pushed to GitLab Container Registry  (main only)
+#   deploy → SSH into server, pull new images, restart  (main only)
+#
+# Required CI/CD Variables  (Settings → CI/CD → Variables):
+#   DEPLOY_SSH_KEY       → private SSH key (mask + protect)
+#   DEPLOY_SSH_KNOWN     → server known_hosts entry
+#   DEPLOY_USER          → SSH user on the server
+#   DEPLOY_HOST          → server IP or hostname
+#   DEPLOY_PATH          → absolute project path on the server
+#
+# GitLab built-in variables used automatically:
+#   CI_REGISTRY           → registry.gitlab.com
+#   CI_REGISTRY_IMAGE     → registry.gitlab.com/<namespace>/<project>
+#   CI_REGISTRY_USER      → GitLab CI user for the registry
+#   CI_REGISTRY_PASSWORD  → token for the registry
+#   CI_COMMIT_SHORT_SHA   → short commit hash
+# ──────────────────────────────────────────────────────────────────────────────
+
+stages:
+  - check
+  - build
+  - deploy
+
+# ── default settings ──────────────────────────────────────────────────────────
+default:
+  interruptible: true
+
+# ── shared Docker login snippet ───────────────────────────────────────────────
+.docker_login: &docker_login
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 1 — CHECK
+# ─────────────────────────────────────────────────────────────────────────────
+
+frontend:check:
+  stage: check
+  image: node:20-alpine
+  cache:
+    key: npm-$CI_COMMIT_REF_SLUG
+    paths:
+      - frontend/node_modules/
+  before_script:
+    - cd frontend
+    - npm ci
+  script:
+    - npx tsc --noEmit
+    - npm run build
+  artifacts:
+    name: frontend-dist
+    paths:
+      - frontend/dist/
+    expire_in: 1 day
+  rules:
+    - changes:
+        - frontend/**/*
+    - if: $CI_COMMIT_BRANCH == "main"
+
+backend:check:
+  stage: check
+  image: python:3.12-slim
+  cache:
+    key: pip-$CI_COMMIT_REF_SLUG
+    paths:
+      - .pip-cache/
+  variables:
+    PIP_CACHE_DIR: .pip-cache
+  script:
+    - cd backend
+    - pip install --upgrade pip -q
+    - pip install fastapi uvicorn[standard] python-multipart
+        httpx pydantic pymupdf pymupdf4llm selectolax huggingface_hub -q
+    - python -m compileall -q app/
+    - |
+      python - <<'EOF'
+      import sys, types
+      for mod in ("torch", "transformers", "sentence_transformers"):
+          sys.modules[mod] = types.ModuleType(mod)
+      from app.main import app
+      assert len(app.routes) > 0
+      print(f"OK — {len(app.routes)} routes registered")
+      EOF
+  rules:
+    - changes:
+        - backend/**/*
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 2 — BUILD (main branch only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+.docker_build_template: &docker_build
+  stage: build
+  image: docker:26
+  services:
+    - docker:26-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_BUILDKIT: "1"
+  <<: *docker_login
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+docker:backend:
+  <<: *docker_build
+  script:
+    - |
+      IMAGE="$CI_REGISTRY_IMAGE/backend"
+      docker pull "$IMAGE:latest" || true
+      docker build \
+        --cache-from "$IMAGE:latest" \
+        --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        -t "$IMAGE:$CI_COMMIT_SHORT_SHA" \
+        -t "$IMAGE:latest" \
+        -f backend/Dockerfile.prod \
+        ./backend
+      docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
+      docker push "$IMAGE:latest"
+
+docker:frontend:
+  <<: *docker_build
+  script:
+    - |
+      IMAGE="$CI_REGISTRY_IMAGE/frontend"
+      docker pull "$IMAGE:latest" || true
+      docker build \
+        --cache-from "$IMAGE:latest" \
+        --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        -t "$IMAGE:$CI_COMMIT_SHORT_SHA" \
+        -t "$IMAGE:latest" \
+        -f frontend/Dockerfile.prod \
+        ./frontend
+      docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
+      docker push "$IMAGE:latest"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 3 — DEPLOY (main branch only, after build)
+# ─────────────────────────────────────────────────────────────────────────────
+
+deploy:production:
+  stage: deploy
+  image: alpine:latest
+  environment:
+    name: production
+    url: http://$DEPLOY_HOST
+  needs:
+    - docker:backend
+    - docker:frontend
+  before_script:
+    - apk add --no-cache openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$DEPLOY_SSH_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$DEPLOY_SSH_KNOWN" >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - |
+      ssh -o StrictHostKeyChecking=yes $DEPLOY_USER@$DEPLOY_HOST << ENDSSH
+        set -e
+        cd $DEPLOY_PATH
+
+        echo "── Logging in to GitLab registry ──"
+        echo "$CI_REGISTRY_PASSWORD" | \
+          docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+
+        echo "── Pulling latest images ──"
+        docker compose -f compose.prod.yaml pull
+
+        echo "── Restarting services ──"
+        docker compose -f compose.prod.yaml up -d --remove-orphans
+
+        echo "── Pruning old images ──"
+        docker image prune -f --filter "until=24h"
+
+        echo "── Done ✓ ──"
+      ENDSSH
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

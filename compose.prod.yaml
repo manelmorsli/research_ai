@@ -1,0 +1,70 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Production compose — uses pre-built images from GHCR / GitLab Registry.
+# Set the REGISTRY_IMAGE env var before running, e.g.:
+#   REGISTRY_IMAGE=ghcr.io/manelmorsli/research_ai docker compose -f compose.prod.yaml up -d
+#
+# Or export it in your shell / .env file:
+#   REGISTRY_IMAGE=ghcr.io/manelmorsli/research_ai
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  research-backend:
+    image: ${REGISTRY_IMAGE:-ghcr.io/manelmorsli/research_ai}/backend:latest
+    container_name: research-backend
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      - huggingface_hub:/huggingface
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - HF_HOME=/huggingface
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  research-frontend:
+    image: ${REGISTRY_IMAGE:-ghcr.io/manelmorsli/research_ai}/frontend:latest
+    container_name: research-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - research-backend
+
+  # ── Ollama — served from its own pre-built image, data kept in volume ──────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    volumes:
+      - recentcode_ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ── One-shot: download jina-embeddings-v3 ─────────────────────────────────
+  # Run manually: docker compose -f compose.prod.yaml run --rm model-downloader
+  model-downloader:
+    image: ${REGISTRY_IMAGE:-ghcr.io/manelmorsli/research_ai}/model-downloader:latest
+    container_name: model-downloader
+    volumes:
+      - huggingface_hub:/huggingface
+    environment:
+      - HF_HOME=/huggingface
+    restart: "no"
+
+volumes:
+  recentcode_ollama_data:
+    external: true
+  huggingface_hub:

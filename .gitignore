@@ -23,12 +23,3 @@ api/embed_model/
 # Tools
 .claude/
 .git/
-
-
-# Prod files (excluded from main — included in prod branch)
-.github/
-.gitlab-ci.yml
-compose.prod.yaml
-backend/Dockerfile.prod
-frontend/Dockerfile.prod
-frontend/nginx.conf
