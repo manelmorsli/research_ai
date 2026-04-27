@@ -87,3 +87,33 @@ export interface ModelStatus {
   context_tokens: number
   size_gb: number
 }
+
+export interface OllamaInstalledModel {
+  name: string
+  model: string
+  size: number
+  digest: string
+  modified_at: string
+  details?: {
+    parameter_size?: string
+    quantization_level?: string
+    format?: string
+    family?: string
+  }
+}
+
+export interface OllamaCatalogItem {
+  name: string
+  type: 'embedding' | 'llm'
+  dims: number | null
+  context: string
+  size: string
+  note: string
+}
+
+export interface OllamaPullStatus {
+  state: 'idle' | 'pulling' | 'done' | 'error'
+  model: string
+  message: string
+  progress: number
+}

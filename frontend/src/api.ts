@@ -1,4 +1,4 @@
-import type { RunParams, ChunkResponse, EmbedResponse, ModelStatus } from './types'
+import type { RunParams, ChunkResponse, EmbedResponse, ModelStatus, OllamaInstalledModel, OllamaCatalogItem, OllamaPullStatus } from './types'
 import { STRATEGY_CONFIG } from './config'
 
 // All API calls go through Vite's proxy at /api → research-backend:8001
@@ -45,6 +45,30 @@ export async function getModelStatus(): Promise<ModelStatus> {
 
 export async function downloadModel(): Promise<{ ok: boolean; message: string }> {
   const resp = await fetch(`${BASE}/models/download`, { method: 'POST' })
+  return resp.json()
+}
+
+export async function getOllamaList(): Promise<{ models: OllamaInstalledModel[]; error: string | null }> {
+  const resp = await fetch(`${BASE}/models/ollama/list`)
+  return resp.json()
+}
+
+export async function getOllamaCatalog(): Promise<{ catalog: OllamaCatalogItem[] }> {
+  const resp = await fetch(`${BASE}/models/ollama/catalog`)
+  return resp.json()
+}
+
+export async function pullOllamaModel(model: string): Promise<{ ok: boolean; message: string }> {
+  const resp = await fetch(`${BASE}/models/ollama/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  })
+  return resp.json()
+}
+
+export async function getOllamaPullStatus(): Promise<OllamaPullStatus> {
+  const resp = await fetch(`${BASE}/models/ollama/pull/status`)
   return resp.json()
 }
 
